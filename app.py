@@ -7,7 +7,7 @@ import re
 
 # Configuration de la page Streamlit
 st.set_page_config(
-    page_title="Manifeste Maritime - Extraction Garantie 100%",
+    page_title="Manifeste Maritime - Extraction Propre (N/A)",
     page_icon="🚢",
     layout="wide"
 )
@@ -35,38 +35,41 @@ def check_password():
         return False
     return True
 
-# --- FONCTION D'EXTRACTION BLINDÉE (ZÉRO ÉCHEC) ---
-def parse_manifest_bulletproof(pdf_file):
-    """Garantit l'extraction de chaque page du PDF en extrayant les informations de texte disponibles sans bloquer à 0."""
+# --- FONCTION D'EXTRACTION AVEC RETOUR N/A SI ABSENT ---
+def parse_manifest_with_na(pdf_file):
+    """Analyse chaque page et met N/A si une information n'est pas trouvée."""
     extracted_rows = []
     
     try:
         reader = pypdf.PdfReader(pdf_file)
+        total_pages = len(reader.pages)
         
-        # Parcourt chaque page du PDF (jusqu'à 200 pages)
-        for page_num, page in enumerate(reader.pages[:200]):
+        if total_pages == 0:
+            return []
+
+        # Parcourt chaque page du PDF une par une (jusqu'à 200 pages)
+        for page_num in range(min(total_pages, 200)):
+            page = reader.pages[page_num]
             text = page.extract_text() or ""
             lines = [l.strip() for l in text.split('\n') if l.strip()]
             
-            # Si la page est totalement vide de texte, on crée quand même sa ligne par défaut
             if not lines:
-                text = "PAGE VIDE"
-                lines = [f"Ligne Page {page_num + 1}"]
+                lines = [f"Page {page_num + 1}"]
 
-            # 1. Recherche du Navire spécifique ou par défaut
-            vessel = "HAIAN GAMA - 550S"
+            # 1. Navire (N/A si introuvable)
+            vessel = "N/A"
             vessel_match = re.search(r'(?:Vessel|Navire|Voyage)\s*[:\-]?\s*([A-Z0-9\s\-]+)', text, re.IGNORECASE)
             if vessel_match:
                 vessel = vessel_match.group(1).strip()[:30]
             else:
                 for l in lines[:5]:
                     l_up = l.upper()
-                    if "GAMA" in l_up or "MAERSK" in l_up or "MSC" in l_up or "VESSEL" in l_up:
+                    if "GAMA" in l_up or "MAERSK" in l_up or "MSC" in l_up:
                         vessel = l[:30]
                         break
 
-            # 2. Port de chargement
-            loading_port = "Jebel Ali"
+            # 2. Port de chargement (N/A si introuvable)
+            loading_port = "N/A"
             port_match = re.search(r'(?:Port of Loading|Loading Port|POL|Port)\s*[:\-]?\s*([A-Za-z\s]+)', text, re.IGNORECASE)
             if port_match:
                 loading_port = port_match.group(1).strip()[:25]
@@ -77,8 +80,8 @@ def parse_manifest_bulletproof(pdf_file):
                         loading_port = p.title()
                         break
 
-            # 3. Consignataire (cherche un nom d'entreprise ou de client dans le texte de la page)
-            consignee = f"Client Page {page_num + 1}"
+            # 3. Consignataire / Client (N/A si introuvable)
+            consignee = "N/A"
             for l in lines:
                 l_up = l.upper()
                 if any(kw in l_up for kw in ["ETS", "SARL", " SA ", "GROUP", "COMPAGNIE", "ENTREPRISE", "DIALLO", "BARRY", "SOCIETE", "TOURE", "KONE", "MAMADOU", "AMADOU", "ALPHA", "COVAL", "AFRICA"]):
@@ -86,9 +89,9 @@ def parse_manifest_bulletproof(pdf_file):
                         consignee = l[:40]
                         break
 
-            # 4. Extraction des conteneurs 20' et 40'
-            c_20 = 1
-            c_40 = 2
+            # 4. Quantités de conteneurs 20' et 40' (0 ou N/A si absents)
+            c_20 = 0
+            c_40 = 0
             
             match_20 = re.search(r'\b(\d{1,2})\s*(?:20\s*[\'"]?\s*DV|20DV|20\s*FT|20\'GP|20)\b', text, re.IGNORECASE)
             if match_20:
@@ -100,8 +103,8 @@ def parse_manifest_bulletproof(pdf_file):
 
             teus = (c_20 * 1) + (c_40 * 2)
 
-            # 5. Marchandise unique de la page
-            commodity = "General Marchandises"
+            # 5. Marchandise principale unique (N/A si introuvable)
+            commodity = "N/A"
             for l in lines:
                 l_up = l.upper()
                 if any(kw in l_up for kw in ["MOTORCYCLE", "BAGS", "CARTONS", "CLOTHES", "TILES", "SPARE PARTS", "SHOES", "CIGARETTES", "DRUMS", "PALLETS", "FROZEN", "RICE", "SUGAR", "TEXTILES", "TEA", "CHICKEN", "GENERAL", "HOUSEGOODS"]):
@@ -109,7 +112,7 @@ def parse_manifest_bulletproof(pdf_file):
                     break
 
             # 6. Trade et Catégorie
-            trade = "20-MIDDLE EAST"
+            trade = "N/A"
             text_up = text.upper()
             if "FAR EAST" in text_up or "NINGBO" in text_up or "NANSHA" in text_up or "QINGDAO" in text_up or "XINGANG" in text_up or "MAWEI" in text_up or "JAKARTA" in text_up or "BUSAN" in text_up or "SHEKOU" in text_up:
                 trade = "21-FAR EAST"
@@ -122,7 +125,7 @@ def parse_manifest_bulletproof(pdf_file):
             elif "AFRICA" in text_up or "CASABLANCA" in text_up or "TUNIS" in text_up:
                 trade = "17-NORTH AFRICA"
 
-            category = "General Housegoods"
+            category = "N/A"
             comm_up = commodity.upper()
             if "MOTORCYCLE" in comm_up:
                 category = "Motorbike & Tricycles"
@@ -148,7 +151,7 @@ def parse_manifest_bulletproof(pdf_file):
             elif "CMA CGM" in text_up:
                 line_name = "CMA CGM"
 
-            # Ajout systématique de la ligne pour cette page
+            # Ajout de la ligne pour cette page
             extracted_rows.append({
                 "MONTHS": "Jan-26",
                 "Ligne": line_name,
@@ -156,29 +159,29 @@ def parse_manifest_bulletproof(pdf_file):
                 "LOADING PORT": loading_port,
                 "consignee": consignee,
                 "COMMODITIES": commodity,
-                "20'DV": c_20,
-                "40'HC": c_40,
-                "TEU's": teus,
+                "20'DV": c_20 if c_20 > 0 else "N/A",
+                "40'HC": c_40 if c_40 > 0 else "N/A",
+                "TEU's": teus if teus > 0 else "N/A",
                 "Trade": trade,
                 "Commodity-category": category,
                 "Document_Source": f"{pdf_file.name} (Page {page_num + 1})"
             })
 
     except Exception as e:
-        st.error(f"Erreur critique lors de la lecture : {e}")
+        st.error(f"Erreur lors du traitement du fichier : {e}")
 
     return extracted_rows
 
 if check_password():
     with st.sidebar:
         st.write("👤 **Session Active**")
-        st.info("⚡ **Mode Blindé 100% Actif** : Génération garantie d'une ligne par page sans aucun risque de blocage à 0.")
+        st.info("📌 **Mode N/A Actif** : Les données absentes sont automatiquement signalées par N/A.")
         if st.button("🔴 Se déconnecter"):
             st.session_state.authenticated = False
             st.rerun()
 
-    st.title("🚢 Manifeste Maritime - Extraction Garantie 100%")
-    st.markdown("Importez votre manifeste PDF : chaque page générera sa propre ligne de données structurée de manière infaillible.")
+    st.title("🚢 Manifeste Maritime - Extraction Propre (N/A si vide)")
+    st.markdown("Importez votre manifeste PDF : chaque page génère sa ligne et affiche N/A en l'absence de données.")
 
     if "manifeste_df" not in st.session_state:
         st.session_state.manifeste_df = pd.DataFrame(columns=[
@@ -199,12 +202,12 @@ if check_password():
 
         preview_data = []
         if uploaded_pdf is not None:
-            with st.spinner("🔍 Analyse infaillible de toutes les pages en cours..."):
-                preview_data = parse_manifest_bulletproof(uploaded_pdf)
-                st.success(f"✨ Succès ! **{len(preview_data)} lignes uniques** (exactement une par page) ont été générées sans erreur.")
+            with st.spinner("🔍 Analyse de toutes les pages du document..."):
+                preview_data = parse_manifest_with_na(uploaded_pdf)
+                st.success(f"✨ Succès ! **{len(preview_data)} lignes** générées.")
 
         if preview_data:
-            st.subheader("Aperçu du Tableau Structuré :")
+            st.subheader("Aperçu du Tableau :")
             preview_df = pd.DataFrame(preview_data)
             st.dataframe(preview_df, use_container_width=True)
 
@@ -214,7 +217,7 @@ if check_password():
                     ignore_index=True
                 )
                 st.balloons()
-                st.success("Toutes les lignes ont été ajoutées avec succès à la base de données et aux rapports !")
+                st.success("Toutes les lignes ont été ajoutées avec succès !")
 
     # --- ONGLET 2 : RAPPORTS MENSUELS ---
     with tab2:
@@ -225,10 +228,15 @@ if check_password():
         if df.empty:
             st.warning("Aucune donnée disponible. Importez un document dans le premier onglet.")
         else:
+            # Conversion sécurisée pour les calculs métriques
+            numeric_teus = pd.to_numeric(df["TEU's"], errors='coerce').fillna(0)
+            numeric_20 = pd.to_numeric(df["20'DV"], errors='coerce').fillna(0)
+            numeric_40 = pd.to_numeric(df["40'HC"], errors='coerce').fillna(0)
+
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total TEU's", int(df["TEU's"].sum()))
-            col2.metric("Total 20'DV", int(df["20'DV"].fillna(0).sum()))
-            col3.metric("Total 40'HC", int(df["40'HC"].fillna(0).sum()))
+            col1.metric("Total TEU's", int(numeric_teus.sum()))
+            col2.metric("Total 20'DV", int(numeric_20.sum()))
+            col3.metric("Total 40'HC", int(numeric_40.sum()))
             col4.metric("Nombre d'expéditions", len(df))
             
             st.markdown("---")
@@ -237,19 +245,16 @@ if check_password():
             
             with g1:
                 st.subheader("Volume TEUs par Ligne Maritime")
-                trade_chart = df.groupby("Ligne")["TEU's"].sum()
-                st.bar_chart(trade_chart)
+                trade_chart = df.groupby("Ligne")[df["TEU's"].apply(lambda x: pd.to_numeric(x, errors='coerce')).name].sum() if "TEU's" in df else pd.Series()
+                st.bar_chart(numeric_teus)
                 
             with g2:
-                st.subheader("Répartition des TEUs par Trade")
-                trade_summary = df.groupby("Trade")["TEU's"].sum()
-                if not trade_summary.empty:
-                    st.bar_chart(trade_summary)
-                else:
-                    st.info("Données insuffisantes pour le graphique.")
+                st.subheader("Répartition par Trade")
+                trade_summary = df.groupby("Trade").size()
+                st.bar_chart(trade_summary)
                 
             st.subheader("Top Consignataires (Consignees)")
-            top_consignees = df.groupby("consignee")["TEU's"].sum().reset_index().sort_values(by="TEU's", ascending=False)
+            top_consignees = df.groupby("consignee").size().reset_index(name="Nombre").sort_values(by="Nombre", ascending=False)
             st.dataframe(top_consignees, use_container_width=True)
 
     # --- ONGLET 3 : EXPORT EXCEL ---
